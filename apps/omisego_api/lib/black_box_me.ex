@@ -1,14 +1,11 @@
 defmodule OmiseGO.API.BlackBoxMe do
   @moduledoc """
   Generates dumb wrapper for pure library that keeps state in process dictionary.
-  Wrapper creates module with :"GS" attached at the end.
+  Wrapper creates module.
 
   Example:
   ```
-  defmodule YourProject.State.Core do
-    use OmiseGO.API.BlackBoxMe
-    ...
-
+  OmiseGO.API.BlackBoxMe.create(YourProject.State.Core, CoreGS) # generate module name CoreGS
   ```
   would create a YourProject.State.CoreGS module, accessible in every MIX_ENV.
 
@@ -21,31 +18,17 @@ defmodule OmiseGO.API.BlackBoxMe do
 
   Wrapper adds following helper functions:
 
-  # initiate state with call to this:
-  @spec init(state()) :: {:ok, :state_managed_by_helper}
-
-  # cleanup state stored in process dictionary
-  @spec reset() :: state() | nil
+  # set state in process dictionary
+  @spec set_state( state() | nil) :: state() | nil
 
   # get state stored in process dictionary (for possible inspection)
   @spec get_state() :: state() | nil
 
   """
-  defmacro __using__(_opts) do
+  defp state_functions(core) do
     quote do
-      @before_compile OmiseGO.API.BlackBoxMe
-    end
-  end
-
-  defp insert_static(core) do
-    quote do
-      def init(state) do
+      def set_state(state) do
         Process.put(unquote(core), state)
-        {:ok, :state_managed_by_helper}
-      end
-
-      def reset do
-        Process.put(unquote(core), nil)
       end
 
       def get_state do
@@ -54,71 +37,49 @@ defmodule OmiseGO.API.BlackBoxMe do
     end
   end
 
-  defp make_module_name(core) do
-    core
-    |> Atom.to_string()
-    |> Kernel.<>("GS")
-    |> String.to_atom()
+  defp create_wrapper_function({func_name, arity}, core) do
+    args = Macro.generate_arguments(arity - 1, nil)
+
+    quote do
+      def unquote(func_name)(unquote_splicing(args)) do
+        state = get_state()
+
+        case :erlang.apply(unquote(core), unquote(func_name), unquote(args) ++ [state]) do
+          {:ok, side_effects, new_state} ->
+            set_state(new_state)
+            {:ok, side_effects}
+
+          {:ok, new_state} ->
+            set_state(new_state)
+            :ok
+
+          {{:error, error}, new_state} ->
+            set_state(new_state)
+            {:error, error}
+
+          unexpected ->
+            IO.puts(
+              "unexpected output #{inspect(unquote(func_name)(unquote_splicing(args)))} :: #{inspect(unexpected)}"
+            )
+
+            :erlang.error({:badreturn, unexpected})
+        end
+      end
+    end
   end
 
-  defmacro __before_compile__(opts) do
-    specials = [__info__: 1, __struct__: 0, __struct__: 1, module_info: 0, module_info: 1]
-    core = hd(opts.context_modules)
-    exports = Module.definitions_in(core, :def)
-    exports = exports -- specials
+  defmacro create({:__aliases__, _, list_atoms}, {:__aliases__, _, dest}) do
+    core = Module.concat(list_atoms)
+    module_name = Module.concat(dest)
 
-    module_static = insert_static(core)
+    contents =
+      :functions
+      |> core.__info__()
+      |> Enum.filter(fn {function_name, _} -> !MapSet.member?(MapSet.new([:__info__, :__struct__]), function_name) end)
+      |> Enum.map(&create_wrapper_function(&1, core))
+      |> List.insert_at(0, state_functions(core))
 
-    contents = [module_static]
-
-    exports =
-      for {func_name, arity} <- exports do
-        args =
-          for x <- :lists.seq(1, arity - 1) do
-            argname = String.to_atom("arg#{inspect(x)}")
-            {argname, [], nil}
-          end
-
-        {func_name, args}
-      end
-
-    module_api =
-      Enum.map(exports, fn {func_name, args} ->
-        quote do
-          def unquote(func_name)(unquote_splicing(args)) do
-            state = Process.get(unquote(core))
-
-            case :erlang.apply(unquote(core), unquote(func_name), unquote(args) ++ [state]) do
-              {:ok, sideeffects, new_state} ->
-                Process.put(unquote(core), new_state)
-                {:ok, sideeffects}
-
-              {:ok, new_state} ->
-                Process.put(unquote(core), new_state)
-                :ok
-
-              {{:error, error}, new_state} ->
-                Process.put(unquote(core), new_state)
-                {:error, error}
-
-              unexpected ->
-                IO.puts(
-                  "unexpected output #{inspect(unquote(func_name)(unquote_splicing(args)))} :: #{inspect(unexpected)}"
-                )
-
-                :erlang.error({:badreturn, unexpected})
-            end
-          end
-        end
-      end)
-
-    contents = contents ++ module_api
-
-    module_name = make_module_name(core)
-
-    # generate the helper module:
     {:module, _, _, _} = Module.create(module_name, contents, Macro.Env.location(__ENV__))
-    # but don't introduce any changes into caller module:
     []
   end
 end

@@ -3,10 +3,6 @@ defmodule OmiseGO.API.State.Core do
   Functional core for State.
   """
 
-  # this `use` generates OmiseGO.API.State.CoreGS module:
-  # TODO: rework macro so it can be called from test code only
-  use OmiseGO.API.BlackBoxMe
-
   @maximum_block_size 65_536
 
   defstruct [:height, :last_deposit_height, :utxos, pending_txs: [], tx_index: 0]

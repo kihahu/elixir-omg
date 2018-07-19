@@ -8,7 +8,10 @@ defmodule OmiseGO.API.State.PropTest do
   import PropCheck.BasicTypes
   use ExUnit.Case
   alias OmiseGO.API.State.Core
-  alias OmiseGO.API.State.CoreGS
+
+  require OmiseGO.API.BlackBoxMe
+  OmiseGO.API.BlackBoxMe.create(OmiseGO.API.State.Core, CoreGS)
+
   @moduletag capture_log: true
 
   # TODO: make aggregation and statistics informative
@@ -17,7 +20,7 @@ defmodule OmiseGO.API.State.PropTest do
       trap_exit do
         init()
         {history, state, result} = run_commands(__MODULE__, cmds)
-        CoreGS.reset()
+        CoreGS.set_state(nil)
 
         success = result == :ok
 
@@ -37,7 +40,7 @@ defmodule OmiseGO.API.State.PropTest do
 
   def init do
     {:ok, state} = Core.extract_initial_state([], 0, 0, 1000)
-    {:ok, :state_managed_by_helper} = CoreGS.init(state)
+    CoreGS.set_state(state)
   end
 
   ##############
