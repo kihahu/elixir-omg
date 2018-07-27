@@ -4,14 +4,16 @@ defmodule OmiseGO.API.State do
   The state meant here is the state of the ledger (UTXO set), that determines spendability of coins and forms blocks.
   All spend transactions, deposits and exits should sync on this for validity of moving funds.
   """
-
+  alias OmiseGO.API.Block
   alias OmiseGO.API.BlockQueue
   alias OmiseGO.API.FreshBlocks
   alias OmiseGO.API.State.Core
   alias OmiseGO.API.State.Transaction
   alias OmiseGO.DB
+  alias OmiseGO.Eth
+  alias OmiseGOWatcher.Eventer
 
-  require Logger
+  use OmiseGO.API.LoggerExt
 
   ### Client
 
@@ -30,7 +32,11 @@ defmodule OmiseGO.API.State do
     GenServer.cast(__MODULE__, {:form_block, child_block_interval})
   end
 
-  @spec deposit(deposits :: [Core.deposit()]) :: {:ok, Core.side_effects()}
+  def close_block(child_block_interval) do
+    GenServer.cast(__MODULE__, {:close_block, child_block_interval})
+  end
+
+  @spec deposit(deposits :: [Core.deposit()]) :: :ok
   def deposit(deposits_enc) do
     deposits = Enum.map(deposits_enc, &Core.decode_deposit/1)
     GenServer.call(__MODULE__, {:deposits, deposits})
@@ -54,10 +60,6 @@ defmodule OmiseGO.API.State do
     GenServer.call(__MODULE__, :get_current_height)
   end
 
-  def close_block(child_block_interval) do
-    GenServer.cast(__MODULE__, {:close_block, child_block_interval})
-  end
-
   ### Server
 
   use GenServer
@@ -69,6 +71,11 @@ defmodule OmiseGO.API.State do
     {:ok, height_query_result} = DB.child_top_block_number()
     {:ok, last_deposit_query_result} = DB.last_deposit_height()
     {:ok, utxos_query_result} = DB.utxos()
+
+    _ =
+      Logger.info(fn ->
+        "Started State, height '#{height_query_result}', deposit height '#{last_deposit_query_result}'"
+      end)
 
     Core.extract_initial_state(
       utxos_query_result,
@@ -136,6 +143,32 @@ defmodule OmiseGO.API.State do
   end
 
   @doc """
+    Wraps up accumulated transactions submissions into a block, triggers db update and emits
+    events to Eventer
+  """
+  def handle_cast({:close_block, child_block_interval}, state) do
+    {duration, {:ok, {%Block{hash: block_hash}, event_triggers, db_updates}, new_state}} =
+      :timer.tc(fn -> Core.form_block(child_block_interval, state) end)
+
+    _ = Logger.info(fn -> "Done closing block in #{round(duration / 1000)} ms" end)
+
+    :ok = DB.multi_update(db_updates)
+
+    %{eth_height: eth_height} = Eth.get_block_submission(block_hash)
+
+    event_triggers =
+      event_triggers
+      |> Enum.map(fn event_trigger ->
+        event_trigger
+        |> Map.put(:submited_at_ethheight, eth_height)
+      end)
+
+    Eventer.notify(event_triggers)
+
+    {:noreply, new_state}
+  end
+
+  @doc """
   Wraps up accumulated transactions into a block, triggers db update,
   publishes block and enqueues for submission
   """
@@ -146,20 +179,7 @@ defmodule OmiseGO.API.State do
     result
   end
 
-  @doc """
-    Wraps up accumulated transactions submissionsinto a block, triggers db update and emits
-    events to Eventer
-  """
-  def handle_cast({:close_block, child_block_interval}, state) do
-    {_core_form_block_duration, {:ok, {_block, _event_triggers, db_updates}, new_state}} =
-      :timer.tc(fn -> Core.form_block(child_block_interval, state) end)
-
-    :ok = DB.multi_update(db_updates)
-    {:noreply, new_state}
-  end
-
   defp do_form_block(child_block_interval, state) do
-    # TODO event_triggers is ignored because Eventer is moving to Watcher - tidy this
     {core_form_block_duration, core_form_block_result} =
       :timer.tc(fn -> Core.form_block(child_block_interval, state) end)
 
@@ -178,8 +198,16 @@ defmodule OmiseGO.API.State do
   end
 
   defp do_exit_utxos(utxos, state) do
-    # TODO event_triggers is ignored because Eventer is moving to Watcher - tidy this
     {:ok, {_event_triggers, db_updates}, new_state} = Core.exit_utxos(utxos, state)
+
+    _ =
+      Logger.debug(fn ->
+        utxos =
+          db_updates
+          |> Enum.map(fn {:delete, :utxo, utxo} -> "#{inspect(utxo)}" end)
+
+        "UTXOS: " <> Enum.join(utxos, ", ")
+      end)
 
     # GenServer.call
     :ok = DB.multi_update(db_updates)
