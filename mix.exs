@@ -19,6 +19,7 @@ defmodule OmiseGO.Umbrella.MixProject do
 
   defp deps do
     [
+      {:apex, "~>1.2.0"},
       {:dialyxir, "~> 0.5", only: [:dev], runtime: false},
       {:credo, "~> 0.9", only: [:dev, :test], runtime: false},
       {:excoveralls, "~> 0.8", only: [:test], runtime: false},

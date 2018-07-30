@@ -12,8 +12,17 @@ import_config "../apps/*/config/config.exs"
 # Sample configuration (overrides the imported configuration above):
 
 config :logger, :console,
-  level: :info,
-  format: "$date $time [$level] $metadata⋅$message⋅\n",
-  metadata: [:module, :function]
+  # :info,
+  level: :debug,
+  # :infinity,
+  truncate: 500_000,
+  format: {OmiseGO.API.LoggerExt, :format},
+  # format: "$date $time [$level] $metadata⋅$message⋅\n",
+  metadata: [:module, :function, :line]
 
+# config :logger,
+#  compile_time_purge_matching: [
+#    [application: :foo],
+#    [module: Bar, function: "foo/3", level_lower_than: :error]
+#  ]
 import_config "#{Mix.env()}.exs"

@@ -13,8 +13,24 @@ defmodule OmiseGO.API.State.PropTest do
   OmiseGO.API.BlackBoxMe.create(OmiseGO.API.State.Core, CoreGS)
 
   @moduletag capture_log: true
+  @moduletag :wip1
+  @inspect_opts [
+    pretty: true,
+    width: 120,
+    syntax_colors: [
+      number: "\e[38;2;97;175;239m",
+      atom: "\e[38;2;86;182;194m",
+      tuple: :light_magenta,
+      map: :light_white,
+      list: :light_green
+    ]
+  ]
+  defp background(str, {r, g, b}) do
+    String.replace(IO.ANSI.reset() <> str, IO.ANSI.reset(), "\e[48;2;#{r};#{g};#{b}m") <> IO.ANSI.reset()
+  end
 
   # TODO: make aggregation and statistics informative
+<<<<<<< Updated upstream
 
   describe "core handles deposits" do
     property "quick test of property test", [:quiet, max_size: 100, numtests: 10] do
@@ -46,8 +62,33 @@ defmodule OmiseGO.API.State.PropTest do
         )
         |> aggregate(command_names(cmds))
         |> collect(length(cmds))
+=======
+  # [:verbose, :noshrink, max_size: 10, constraint_tries: 1, numtests: 3, start_size: 3]
+  property "OmiseGO.API.State.Core prope check", max_size: 10, constraint_tries: 1, numtests: 3 do
+    fun =
+      forall cmds <- commands(__MODULE__) do
+        trap_exit do
+          init()
+          {history, state, result} = run_commands(__MODULE__, cmds)
+
+          (result == :ok)
+          |> when_fail(
+            """
+            Commands: #{inspect(cmds, @inspect_opts)}
+            History: #{inspect(history, @inspect_opts)}
+            State: #{inspect(state, @inspect_opts)}
+            Result: #{inspect(result, @inspect_opts)}
+            """
+            |> background({40, 44, 52})
+          )
+          |> aggregate(command_names(cmds))
+          |> collect(length(cmds))
+        end
+>>>>>>> Stashed changes
       end
-    end
+
+    # IO.puts("plum: #{inspect(fun, @inspect_opts)}")
+    fun
   end
 
   def init do
@@ -59,8 +100,8 @@ defmodule OmiseGO.API.State.PropTest do
   # generators #
   ##############
 
-  def deposit(blknum) do
-    let [owner <- address(), amount <- pos_integer()] do
+  def deposit_generator(blknum) do
+    let [owner <- address_generator(), amount <- pos_integer()] do
       %{
         blknum: blknum,
         # currency
@@ -73,7 +114,7 @@ defmodule OmiseGO.API.State.PropTest do
     end
   end
 
-  def address do
+  def address_generator do
     addresses =
       OmiseGO.API.TestHelper.entities()
       |> Map.split([:stable_alice, :stable_bob, :stable_mallory])
@@ -84,6 +125,11 @@ defmodule OmiseGO.API.State.PropTest do
     oneof(addresses)
   end
 
+  defp exit_generator(spendable_map) do
+    spendable = Map.to_list(spendable_map)
+    oneof(spendable)
+  end
+
   ###########
   # helpers # (to be replaced by other moving parts of the system)
   ###########
@@ -91,6 +137,7 @@ defmodule OmiseGO.API.State.PropTest do
   # Commands (alias, wrappers, etc)
 
   def exec(utxo1, utxo2, newowner1, newowner2, split) do
+    # IO.puts("prop_test.exec: #{inspect(utxo1, @inspect_opts)}")
     outs = outputs(utxo1, utxo2, keypair(newowner1), keypair(newowner2), split)
     ins = tagged_inputs([utxo1, utxo2])
     rec = OmiseGO.API.TestHelper.create_recovered(ins, <<0::160>>, outs)
@@ -106,7 +153,7 @@ defmodule OmiseGO.API.State.PropTest do
 
     [
       {:call, __MODULE__, :exec,
-       [oneof(spendable), oneof([nil, oneof(spendable)]), address(), address(), float(0.0, 1.0)]}
+       [oneof(spendable), oneof([nil, oneof(spendable)]), address_generator(), address_generator(), float(0.0, 1.0)]}
     ]
   end
 
@@ -114,6 +161,9 @@ defmodule OmiseGO.API.State.PropTest do
     spendable_map =
       model.history
       |> spendable()
+
+    # spendable_map, @inspect_opts)}")
+    IO.puts("generate command >>>-- #{inspect(map_size(spendable_map))}")
 
     tx =
       case map_size(spendable_map) > 0 do
@@ -124,9 +174,15 @@ defmodule OmiseGO.API.State.PropTest do
           []
       end
 
+    exits_utxos =
+      case map_size(spendable_map) > 0 do
+        true -> [{:call, CoreGS, :exit_utxos, [[exit_generator(spendable_map)]]}]
+        false -> []
+      end
+
     deposit =
       case eth.blknum - eth.blknum / 1000 != 999 do
-        true -> [{:call, CoreGS, :deposit, [[deposit(eth.blknum + 1)]]}]
+        true -> [{:call, CoreGS, :deposit, [[deposit_generator(eth.blknum + 1)]]}]
         false -> []
       end
 
@@ -135,9 +191,14 @@ defmodule OmiseGO.API.State.PropTest do
       # {:call, CoreGS, :exit_utxos, [[exit_utxo()]]},
     ]
 
-    oneof(tx ++ deposit ++ rest)
+    result = oneof(tx ++ exits_utxos ++ deposit ++ rest)
+    # IO.puts("command>> #{inspect(result, @inspect_opts)} ")
+    result
   end
 
+  #####################
+  #  model of state   #
+  #####################
   def initial_state do
     # Child Chain model
     model = %{
@@ -150,6 +211,16 @@ defmodule OmiseGO.API.State.PropTest do
     # Ethereum state
     eth = %{blknum: 0}
     {model, eth}
+  end
+
+  def next_state({model, eth} = state, _, {_, _, :exit_utxos, [ret?]}) do
+    # IO.puts("utxo +++++++> #{inspect(ret?, @inspect_opts)}")
+    # case valid_utxos?(spendable(model.history), [utxo]) do
+    #  true ->
+    #    {}
+    # end
+
+    state
   end
 
   def next_state({model, eth}, _, {_, _, :form_block, _}) do
@@ -180,9 +251,13 @@ defmodule OmiseGO.API.State.PropTest do
 
   # tx should spent utxo known to model
   def precondition({model, _eth}, {_, _, :exec, [utxo1, utxo2, _, _, _]}) do
-    spendable_map = spendable(model.history)
+    # spendable_map = spendable(model.history)
+    #
+    # non_zero_utxos?([utxo1, utxo2]) and valid_utxos?(spendable_map, [utxo1, utxo2])
+  end
 
-    non_zero_utxos?([utxo1, utxo2]) and valid_utxos?(spendable_map, [utxo1, utxo2])
+  def precondition({model, eth}, {_, _, :exit_utxos, [ret?]}) do
+    true
   end
 
   def precondition(_model, _call), do: true
@@ -206,9 +281,9 @@ defmodule OmiseGO.API.State.PropTest do
       false ->
         tagged = Enum.zip([:in1, :in2, :owner1, :owner2, :split], args)
         IO.puts("===============================")
-        IO.puts("spendable is #{inspect(spendable(model.history))}")
-        IO.puts("transaction is #{inspect(tagged)}")
-        IO.puts("result is #{inspect(result)}")
+        IO.puts("spendable is #{inspect(spendable(model.history), @inspect_opts)}")
+        IO.puts("transaction is #{inspect(tagged, @inspect_opts)}")
+        IO.puts("result is #{inspect(result, @inspect_opts)}")
         IO.puts("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
         false
     end

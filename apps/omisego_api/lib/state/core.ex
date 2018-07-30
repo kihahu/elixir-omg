@@ -11,6 +11,7 @@ defmodule OmiseGO.API.State.Core do
   alias OmiseGO.API.Crypto
   alias OmiseGO.API.State.Core
   alias OmiseGO.API.State.Transaction
+  use OmiseGO.API.LoggerExt
 
   @type t() :: %__MODULE__{
           height: non_neg_integer(),
