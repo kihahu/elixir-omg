@@ -7,7 +7,7 @@ defmodule OmiseGO.API.State.PropMYTest do
   use PropCheck.StateM.DSL
   import PropCheck.BasicTypes
   use ExUnit.Case
-  alias OmiseGO.API.State.Core
+  alias OmiseGO.API.State.{Core, Transaction}
 
   use OmiseGO.API.LoggerExt
   alias OmiseGO.API.LoggerExt
@@ -18,19 +18,7 @@ defmodule OmiseGO.API.State.PropMYTest do
 
   @moduletag :wip11
 
-  @inspect_opts [
-    pretty: true,
-    width: 120,
-    syntax_colors: [
-      number: "\e[38;2;97;175;239m",
-      atom: "\e[38;2;86;182;194m",
-      tuple: :light_magenta,
-      map: :light_white,
-      list: :light_green
-    ]
-  ]
-
-  defp insp(value), do: value |> inspect(@inspect_opts)
+  defp insp(value), do: value |> inspect()
   defp print(value, rgb \\ {40, 44, 52}), do: value |> insp |> background(rgb) |> IO.puts()
 
   defp background(str, {r, g, b}),
@@ -38,7 +26,7 @@ defmodule OmiseGO.API.State.PropMYTest do
 
   # TODO: make aggregation and statistics informative
   # [:verbose, :noshrink, max_size: 10, constraint_tries: 1, numtests: 3, start_size: 3]
-  property "OmiseGO.API.State.Core prope check", max_size: 100, numtests: 10, start_size: 1 do
+  property "OmiseGO.API.State.Core prope check", max_size: 4, numtests: 40, start_size: 3 do
     forall cmds <- commands(__MODULE__) do
       trap_exit do
         print("============> start run", {20, 60, 80})
@@ -50,10 +38,10 @@ defmodule OmiseGO.API.State.PropMYTest do
           (result == :ok)
           |> when_fail(
             """
-            Result: #{inspect(result, @inspect_opts)}
-            Commands: #{inspect(cmds, @inspect_opts)}
-            History: #{inspect(history, @inspect_opts)}
-            State: #{inspect(state, @inspect_opts)}
+            Result: #{inspect(result)}
+            Commands: #{inspect(cmds)}
+            History: #{inspect(history)}
+            State: #{inspect(state)}
             """
             |> IO.puts()
           )
@@ -77,32 +65,33 @@ defmodule OmiseGO.API.State.PropMYTest do
     }
   end
 
-  def address do
+  def entitie(what) do
     addresses =
       OmiseGO.API.TestHelper.entities()
       |> Map.split([:stable_alice, :stable_bob, :stable_mallory])
       |> elem(0)
       |> Map.values()
-      |> Enum.map(&Map.get(&1, :addr))
+      |> Enum.map(&Map.get(&1, what))
 
-    # IO.puts(addresses)
-    List.first(addresses)
+    oneof(addresses)
   end
 
   def currency do
-    <<0::160>>
+    frequency([{10, <<0::160>>}, {1, <<1::160>>}])
   end
 
-  defcommand :deposit do
+  defcommand :deposits do
     def impl(deposits), do: CoreGS2.deposit(deposits)
 
     def args(%{eth: %{blknum: blknum}} = str) do
-      let [number_of_deposit <- integer(1, 20), amount <- pos_integer()] do
-        deposits =
-          for number <- 1..number_of_deposit,
-              do: %{blknum: blknum + number, currency: currency(), owner: address(), amount: amount}
-
-        [deposits]
+      let [number_of_deposit <- integer(1, 5)] do
+        [
+          for number <- 1..number_of_deposit do
+            let [currency <- currency(), owner <- entitie(:addr), amount <- pos_integer()] do
+              %{blknum: blknum + number, currency: currency, owner: owner, amount: amount}
+            end
+          end
+        ]
       end
     end
 
@@ -124,49 +113,134 @@ defmodule OmiseGO.API.State.PropMYTest do
       length(arg) == new_utxo
     end
 
-    def next(%{eth: %{blknum: blknum} = eth, model: %{history: history} = modle} = state, [args], ret) do
+    def next(%{eth: %{blknum: blknum} = eth, model: %{history: history} = model} = state, [args], ret) do
       %{
         state
         | eth: %{eth | blknum: blknum + length(args)},
-          model: %{modle | history: [{:deposit, args, ret} | history]}
+          model: %{model | history: [{:deposits, args, ret} | history]}
       }
     end
   end
 
   defcommand :form_block do
     def impl() do
-      Logger.info("form _block")
-      CoreGS2.form_block(1_000)
+      Logger.debug("form_block")
+      ret = CoreGS2.form_block(1_000)
+      Logger.debug("form_block__end")
+      ret
+    rescue
+      msg ->
+        state = CoreGS2.get_state()
+        IO.puts(inspect(state))
+        Logger.error("wtf #{inspect(msg)} state: #{inspect(state)} ")
+        :error
     end
 
+    # {:ok, {block, tx_events, db_update}}) do
     def post(state, [], ret) do
-      true
+      # TODO add check transsaction in block with history
+      :error != ret
     end
 
-    def next(state, args, ret) do
-      state
+    def next(%{model: %{history: history} = model} = state, args, ret) do
+      %{state | model: %{model | history: [{:form_block, args, ret} | history]}}
     end
   end
 
-  # defcommand :deposit do
-  #  def impl(arg) do
-  #    print(arg)
-  #    arg + 1
-  #  end
-  #
-  #  def args([state]) do
-  #    "args:[#{1 + state}]" |> background({10, 10, 10}) |> IO.puts()
-  #    [1 + state]
-  #  end
-  #
-  #  def pre([state], [arg]) do
-  #    IO.puts("pre: #{inspect(state)}, arg: #{inspect(arg)}")
-  #    true
-  #  end
-  #
-  #  def next([state], [arg], res) do
-  #    "deposit state change:#{state} to: #{arg}  res: #{inspect(res)}" |> background({10, 10, 10}) |> IO.puts()
-  #    [arg]
-  #  end
+  def get_utxo(history, currency) do
+    utxo =
+      history
+      |> Enum.flat_map(fn
+        # TODO get utxo from transaction/block
+        {:form_block, _, _} ->
+          []
+
+        {:deposits, utxos, _} ->
+          utxos
+          |> Enum.filter(fn
+            %{currency: currency} -> true
+            _ -> false
+          end)
+          |> Enum.map(&Map.merge(&1, %{oindex: 0, txindex: 0}))
+
+        _ ->
+          []
+      end)
+
+    oneof([nil | utxo])
+  end
+
+  def generate_new_owners(utxos, output_number) do
+    Logger.info(utxos)
+    oneof([1, 2])
+  end
+
+  # defp create_recovered(utxos, ) do
+  #   OmiseGO.API.TestHelper.create_recovered(
+  #      [{1,0,0,alice}], @eth, [{bob,10}]
+  #   )
   # end
+
+  defcommand :transaction do
+    def impl(transaction, fee_map) do
+      CoreGS2.exec(transaction, fee_map)
+    end
+
+    def args(%{model: %{history: history}}) do
+      let [currency <- currency()] do
+        let [utxo1 <- get_utxo(history, currency), utxo2 <- get_utxo(history, currency)] do
+          Logger.debug(inspect(utxo1))
+          total_sum = Map.get(utxo1, :amount, 0) + Map.get(utxo2, :amount, 0)
+
+          let [amount1 <- range(0, total_sum), fee <- range(0, 10)] do
+            [
+              %Transaction.Recovered{
+                signed_tx: %Transaction.Signed{
+                  raw_tx: %Transaction{
+                    blknum1: Map.get(utxo1, :blknum, 0),
+                    txindex1: Map.get(utxo1, :txindex, 0),
+                    oindex1: Map.get(utxo1, :oindex, 0),
+                    blknum2: Map.get(utxo2, :blknum, 0),
+                    txindex2: Map.get(utxo2, :txindex, 0),
+                    oindex2: Map.get(utxo2, :oindex, 0),
+                    amount1: amount1,
+                    amount2: total_sum - amount1 - fee,
+                    cur12: currency
+                  }
+                },
+                spender1: Map.get(utxo1, :owner, nil),
+                spender2: Map.get(utxo2, :owner, nil)
+              },
+              %{currency => 1}
+              #      {utxo1, utxo2, {amount1, total_sum - fee - amount1, fee}}
+            ]
+          end
+        end
+      end
+    end
+
+    def pre(_model, [
+          %Transaction.Recovered{
+            signed_tx: %Transaction.Signed{raw_tx: %Transaction{amount1: amount1, amount2: amount2, cur12: currency}},
+            spender1: spender1,
+            spender2: spender2
+          },
+          fees_map
+        ]) do
+      spender2_valid = if amount2 > 0, do: spender2 != nil, else: true
+      amount1 >= 0 and amount2 >= 0 and spender1 != nil and spender2_valid
+    end
+
+    def pre(_model, _any), do: false
+
+    def post(_state, args, response) do
+      Logger.info(inspect(args))
+      Logger.warn(inspect(response))
+      true
+    end
+
+    def next(%{model: %{history: history} = model} = state, args, ret) do
+      %{state | model: %{model | history: [{:transaction, args, ret} | history]}}
+    end
+  end
 end
