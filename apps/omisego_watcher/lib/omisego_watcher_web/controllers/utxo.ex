@@ -19,6 +19,7 @@ defmodule OmiseGOWatcherWeb.Controller.Utxo do
   end
 
   def compose_utxo_exit(conn, %{"blknum" => blknum, "txindex" => txindex, "oindex" => oindex}) do
+    # FIXME: why they come as strings?
     {blknum, _} = Integer.parse(blknum)
     {txindex, _} = Integer.parse(txindex)
     {oindex, _} = Integer.parse(oindex)

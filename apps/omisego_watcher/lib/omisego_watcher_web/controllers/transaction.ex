@@ -19,6 +19,7 @@ defmodule OmiseGOWatcherWeb.Controller.Transaction do
 
   # Respond with a single transaction
   defp respond_single(%TransactionDB{} = transaction, conn) do
+    # FIXME: rethink parameter binding the smarter way ... (why base16 not 64? anyway)
     # TODO: do the encoding in a smarter way
     #       or just keep the binaries encoded in the database (increases disk footprint)
     transaction = %{

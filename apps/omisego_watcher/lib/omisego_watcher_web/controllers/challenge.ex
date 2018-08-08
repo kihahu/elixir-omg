@@ -11,6 +11,7 @@ defmodule OmiseGOWatcherWeb.Controller.Challenge do
   Challenges exits
   """
   def challenge(conn, %{"utxo" => utxo}) do
+    # FIXME: Integer.parse(utxo)
     {utxo, _} = Integer.parse(utxo)
 
     utxo
