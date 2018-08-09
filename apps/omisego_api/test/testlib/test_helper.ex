@@ -7,13 +7,8 @@ defmodule OmiseGO.API.TestHelper do
   alias OmiseGO.API.State.Core
   alias OmiseGO.API.State.Transaction
 
-  def entities do
-    %{
-      alice: generate_entity(),
-      bob: generate_entity(),
-      carol: generate_entity(),
-
-      # Deterministic entities. Use only when truly needed.
+  def entities_stable,
+    do: %{
       stable_alice: %{
         priv:
           <<54, 43, 207, 67, 140, 160, 190, 135, 18, 162, 70, 120, 36, 245, 106, 165, 5, 101, 183, 55, 11, 117, 126,
@@ -33,7 +28,17 @@ defmodule OmiseGO.API.TestHelper do
         addr: <<48, 120, 88, 246, 235, 202, 79, 121, 216, 73, 40, 199, 165, 186, 120, 113, 36, 119, 87, 207>>
       }
     }
-  end
+
+  def entities,
+    do:
+      Map.merge(
+        %{
+          alice: generate_entity(),
+          bob: generate_entity(),
+          carol: generate_entity()
+        },
+        entities_stable
+      )
 
   def generate_entity do
     {:ok, priv} = Crypto.generate_private_key()

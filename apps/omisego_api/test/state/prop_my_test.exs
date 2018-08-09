@@ -26,7 +26,7 @@ defmodule OmiseGO.API.State.PropMYTest do
 
   # TODO: make aggregation and statistics informative
   # [:verbose, :noshrink, max_size: 10, constraint_tries: 1, numtests: 3, start_size: 3]
-  property "OmiseGO.API.State.Core prope check", max_size: 4, numtests: 40, start_size: 3 do
+  property "OmiseGO.API.State.Core prope check", [:quiet, max_size: 6, numtests: 60, start_size: 3] do
     forall cmds <- commands(__MODULE__) do
       trap_exit do
         print("============> start run", {20, 60, 80})
@@ -62,21 +62,19 @@ defmodule OmiseGO.API.State.PropMYTest do
     %{
       model: %{history: []},
       eth: %{blknum: 1_000}
+      # ,utxo: []
     }
   end
 
-  def entitie(what) do
+  def entitie() do
     addresses =
-      OmiseGO.API.TestHelper.entities()
-      |> Map.split([:stable_alice, :stable_bob, :stable_mallory])
-      |> elem(0)
+      OmiseGO.API.TestHelper.entities_stable()
       |> Map.values()
-      |> Enum.map(&Map.get(&1, what))
 
     oneof(addresses)
   end
 
-  def currency do
+  def get_currency do
     frequency([{10, <<0::160>>}, {1, <<1::160>>}])
   end
 
@@ -84,10 +82,10 @@ defmodule OmiseGO.API.State.PropMYTest do
     def impl(deposits), do: CoreGS2.deposit(deposits)
 
     def args(%{eth: %{blknum: blknum}} = str) do
-      let [number_of_deposit <- integer(1, 5)] do
+      let [number_of_deposit <- integer(1, 2)] do
         [
           for number <- 1..number_of_deposit do
-            let [currency <- currency(), owner <- entitie(:addr), amount <- pos_integer()] do
+            let [currency <- get_currency(), %{addr: owner} <- entitie(), amount <- integer(30, 300_000)] do
               %{blknum: blknum + number, currency: currency, owner: owner, amount: amount}
             end
           end
@@ -124,10 +122,7 @@ defmodule OmiseGO.API.State.PropMYTest do
 
   defcommand :form_block do
     def impl() do
-      Logger.debug("form_block")
-      ret = CoreGS2.form_block(1_000)
-      Logger.debug("form_block__end")
-      ret
+      CoreGS2.form_block(1_000)
     rescue
       msg ->
         state = CoreGS2.get_state()
@@ -147,27 +142,36 @@ defmodule OmiseGO.API.State.PropMYTest do
     end
   end
 
-  def get_utxo(history, currency) do
-    utxo =
-      history
-      |> Enum.flat_map(fn
-        # TODO get utxo from transaction/block
-        {:form_block, _, _} ->
-          []
+  def spendable(history) do
+    spendable(Enum.reverse(history), %{})
+  end
 
-        {:deposits, utxos, _} ->
-          utxos
-          |> Enum.filter(fn
-            %{currency: currency} -> true
-            _ -> false
-          end)
-          |> Enum.map(&Map.merge(&1, %{oindex: 0, txindex: 0}))
+  def spendable([{:deposits, utxos, _} | history], unspent) do
+    entities = OmiseGO.API.TestHelper.entities_stable()
 
-        _ ->
-          []
-      end)
+    utxos
+    |> Enum.map(&Map.merge(&1, %{oindex: 0, txindex: 0}))
+    |> Enum.reduce(unspent, fn %{
+                                 owner: owner,
+                                 amount: amount,
+                                 blknum: blknum,
+                                 currency: currency,
+                                 oindex: oindex,
+                                 txindex: txindex
+                               },
+                               acc ->
+      {_, owner} = Enum.find(entities, fn element -> match?({_, %{addr: ^owner}}, element) end)
+      Map.put_new(acc, {blknum, txindex, oindex, owner}, %{amount: amount, currency: currency})
+    end)
+  end
 
-    oneof([nil | utxo])
+  def spendable([why | history], unspent) do
+    Logger.warn("#{inspect(why)}")
+    spendable(history, unspent)
+  end
+
+  def spendable([], unspent) do
+    unspent
   end
 
   def generate_new_owners(utxos, output_number) do
@@ -175,44 +179,33 @@ defmodule OmiseGO.API.State.PropMYTest do
     oneof([1, 2])
   end
 
-  # defp create_recovered(utxos, ) do
-  #   OmiseGO.API.TestHelper.create_recovered(
-  #      [{1,0,0,alice}], @eth, [{bob,10}]
-  #   )
-  # end
-
   defcommand :transaction do
     def impl(transaction, fee_map) do
+      Logger.info(inspect(transaction))
+      Logger.warn(inspect(fee_map))
       CoreGS2.exec(transaction, fee_map)
     end
 
     def args(%{model: %{history: history}}) do
-      let [currency <- currency()] do
-        let [utxo1 <- get_utxo(history, currency), utxo2 <- get_utxo(history, currency)] do
-          Logger.debug(inspect(utxo1))
-          total_sum = Map.get(utxo1, :amount, 0) + Map.get(utxo2, :amount, 0)
+      spentable = spendable(history)
 
-          let [amount1 <- range(0, total_sum), fee <- range(0, 10)] do
+      let [currency <- get_currency(), new_owner1 <- entitie(), new_owner2 <- entitie(), new_owners <- range(1, 2)] do
+        spentable = [nil | :maps.filter(fn _, %{currency: val} -> val == currency end, spentable) |> Map.to_list()]
+
+        let [utxo1 <- oneof(spentable), utxo2 <- oneof(spentable)] do
+          utxos = [utxo1, utxo2] |> Enum.filter(&(&1 != nil))
+          total_amount = Enum.reduce(utxos, 0, fn {_, %{amount: amount}}, acc -> amount + acc end)
+
+          let [amount1 <- range(0, Enum.max([total_amount - 10, 0])), fee <- range(0, 10)] do
+            amount2 = Enum.max([total_amount - amount1 - fee, 0])
+
             [
-              %Transaction.Recovered{
-                signed_tx: %Transaction.Signed{
-                  raw_tx: %Transaction{
-                    blknum1: Map.get(utxo1, :blknum, 0),
-                    txindex1: Map.get(utxo1, :txindex, 0),
-                    oindex1: Map.get(utxo1, :oindex, 0),
-                    blknum2: Map.get(utxo2, :blknum, 0),
-                    txindex2: Map.get(utxo2, :txindex, 0),
-                    oindex2: Map.get(utxo2, :oindex, 0),
-                    amount1: amount1,
-                    amount2: total_sum - amount1 - fee,
-                    cur12: currency
-                  }
-                },
-                spender1: Map.get(utxo1, :owner, nil),
-                spender2: Map.get(utxo2, :owner, nil)
-              },
-              %{currency => 1}
-              #      {utxo1, utxo2, {amount1, total_sum - fee - amount1, fee}}
+              OmiseGO.API.TestHelper.create_recovered(
+                utxos |> Enum.map(&elem(&1, 0)),
+                currency,
+                Enum.zip(Enum.take([new_owner1, new_owner2], new_owners), [amount1, amount2])
+              ),
+              %{currency => 0}
             ]
           end
         end
@@ -233,9 +226,15 @@ defmodule OmiseGO.API.State.PropMYTest do
 
     def pre(_model, _any), do: false
 
+    def post(state, args, {:error, msg}) do
+      Logger.error("error: #{inspect(msg)} ")
+      Logger.error("args: #{inspect(args)}")
+      Logger.error("state: #{inspect(state)}")
+      false
+    end
+
     def post(_state, args, response) do
-      Logger.info(inspect(args))
-      Logger.warn(inspect(response))
+      Logger.info(inspect(response))
       true
     end
 
