@@ -3,17 +3,27 @@ defmodule OmiseGOWatcher.Eventer.Core do
   Functional core of eventer
   """
 
+  alias OmiseGO.API.Crypto
   alias OmiseGO.API.State.Transaction
   alias OmiseGOWatcher.Eventer.Event
 
   @transfer_topic "transfer"
+  @byzantine_topic "byzantine"
 
-  @spec notify(any()) :: list({Event.t(), binary()})
-  def notify(event_triggers) do
-    Enum.flat_map(event_triggers, &get_events_with_topic(&1))
+  @spec prepare_events(any() | Event.t()) :: list({String.t(), String.t(), Event.t()})
+  def prepare_events(event_triggers) do
+    Enum.flat_map(event_triggers, &get_event_with_topic(&1))
   end
 
-  defp get_events_with_topic(event_trigger) do
+  defp get_event_with_topic(%Event.InvalidBlock{} = event) do
+    [{@byzantine_topic, Event.InvalidBlock.name(), event}]
+  end
+
+  defp get_event_with_topic(%Event.BlockWithHolding{} = event) do
+    [{@byzantine_topic, Event.BlockWithHolding.name(), event}]
+  end
+
+  defp get_event_with_topic(event_trigger) do
     get_address_received_events(event_trigger) ++ get_address_spent_events(event_trigger)
   end
 
@@ -56,7 +66,7 @@ defmodule OmiseGOWatcher.Eventer.Core do
   end
 
   defp create_transfer_subtopic(address) do
-    encoded_address = "0x" <> Base.encode16(address, case: :lower)
+    {:ok, encoded_address} = Crypto.encode_address(address)
     create_subtopic(@transfer_topic, encoded_address)
   end
 

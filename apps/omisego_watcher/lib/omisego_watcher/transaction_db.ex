@@ -8,6 +8,8 @@ defmodule OmiseGOWatcher.TransactionDB do
   import Ecto.Query, only: [from: 2]
 
   alias OmiseGO.API.State.{Transaction, Transaction.Recovered, Transaction.Signed}
+  alias OmiseGO.API.Utxo
+  require Utxo
   alias OmiseGOWatcher.Repo
 
   @field_names [
@@ -55,6 +57,9 @@ defmodule OmiseGOWatcher.TransactionDB do
 
     field(:sig1, :binary, default: <<>>)
     field(:sig2, :binary, default: <<>>)
+
+    field(:spender1, :binary)
+    field(:spender2, :binary)
   end
 
   def get(id) do
@@ -66,23 +71,29 @@ defmodule OmiseGOWatcher.TransactionDB do
     Repo.all(from(tr in __MODULE__, where: tr.txblknum == ^txblknum, select: tr))
   end
 
-  def insert(%{transactions: transactions, number: block_number}) do
+  @doc """
+  Inserts complete and sorted enumberable of transactions for particular block number
+  """
+  def update_with(%{transactions: transactions, number: block_number}) do
     transactions
     |> Stream.with_index()
-    |> Enum.map(fn {%Recovered{signed_tx: %Signed{} = signed}, txindex} ->
-      insert(signed, block_number, txindex)
-    end)
+    |> Enum.map(fn {tx, txindex} -> insert(tx, block_number, txindex) end)
   end
 
-  def insert(
-        %Signed{
-          raw_tx: %Transaction{} = transaction,
-          sig1: sig1,
-          sig2: sig2
-        } = tx,
-        block_number,
-        txindex
-      ) do
+  defp insert(
+         %Recovered{
+           signed_tx:
+             %Signed{
+               raw_tx: %Transaction{} = transaction,
+               sig1: sig1,
+               sig2: sig2
+             } = tx,
+           spender1: spender1,
+           spender2: spender2
+         },
+         block_number,
+         txindex
+       ) do
     id = Signed.signed_hash(tx)
 
     {:ok, _} =
@@ -91,7 +102,9 @@ defmodule OmiseGOWatcher.TransactionDB do
         txblknum: block_number,
         txindex: txindex,
         sig1: sig1,
-        sig2: sig2
+        sig2: sig2,
+        spender1: spender1,
+        spender2: spender2
       }
       |> Map.merge(Map.from_struct(transaction))
       |> Repo.insert()
@@ -103,8 +116,8 @@ defmodule OmiseGOWatcher.TransactionDB do
     |> validate_required(@field_names)
   end
 
-  @spec get_transaction_challenging_utxo(map()) :: {:ok, map()} | :utxo_not_spent
-  def get_transaction_challenging_utxo(%{blknum: blknum, txindex: txindex, oindex: oindex}) do
+  @spec get_transaction_challenging_utxo(Utxo.Position.t()) :: {:ok, map()} | :utxo_not_spent
+  def get_transaction_challenging_utxo(Utxo.position(blknum, txindex, oindex)) do
     query =
       from(
         tx_db in __MODULE__,

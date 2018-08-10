@@ -6,53 +6,109 @@
 
 For the responsibilities and design of the child chain server see [Tesuji Plasma Blockchain Design document](FIXME link pending).
 
-## Setting up
+## Overview of apps
 
-1. Provide an Ethereum node connected to the appropriate network
-1. Deploy `RootChain.sol` contract and prepare operator's authority address
-1. Initialize the child chain database.
-Do that with `mix run --no-start -e 'OmiseGO.DB.init()'`
-1. Produce a configuration file with `omisego_eth` configured to the contract address, operator (authority) address and hash of contract-deploying transaction.
-To do that use the template, filling it with details on the contract:
+OmiseGO is an umbrella app comprising of several Elixir applications.
+The apps listed below belong to the child chain server application, for Watcher-related apps see `apps/omisego_watcher/README.md`.
 
-        use Mix.Config
+The general idea of the apps responsibilities is:
+  - `omisego_api` - child chain server and main entrypoint to the functionality
+    - tracks Ethereum for things happening in the root chain contract (deposits/exits)
+    - gathers transactions, decides on validity, forms blocks, persists
+    - submits blocks to the root chain contract
+    - see `lib/api/application.ex` for a rundown of children processes involved
+  - `omisego_db` - wrapper around the child chain server's database to store the UTXO set and blocks necessary for state persistence
+  - `omisego_eth` - wrapper around the [Ethereum RPC client](https://github.com/exthereum/ethereumex)
+  - `omisego_jsonrpc` - a JSONRPC 2.0 server being the gateway to `omisego_api`
+  - `omisego_performance` - performance tester for the child chain server
 
-        config :omisego_eth,
-          contract_addr: "0x0",
-          authority_addr: "0x0",
-          txhash_contract: "0x0"
+## General setup
+For specific instructions on setting up a developer environment, jump to the next section.
 
+1. Follow the high-level **Setting up** from [here](../../README.md)
 1. Start the child chain server, referencing the configuration file from the previous step with the JSON-RPC interface activated
-  - `cd apps/omisego_jsonrpc`
-  - `mix run --no-halt --config path/to/config.exs`
 
-### Setting up (the developer's environment)
+        cd apps/omisego_jsonrpc
+        mix run --no-halt --config path/to/config.exs
 
-This is an example of how to quickly setup the developer's environment to run the child chain server.
 
-1. For the Ethereum node: `geth --dev --dev.period 1 --rpc --rpcapi personal,web3,eth` gives a disposable private network
-1. For the contract/authority address: (`mix run --no-start -e 'IO.inspect OmiseGO.Eth.DevHelpers.prepare_env!()'`)
-1. Initialize child chain database normally.
-**NOTE** It will use the default db path always (`~/.omisego/data`) so when running child chain and watcher side by side you need to configure more.
-1. Configure `omisego_eth` normally, using data from `prepare_env!`.
-    You can also shortcut with this little Elixir hocus-pocus:
+## Setting up (a developer environment)
+### Start up developer instance of Ethereum
+The easiest way to get started is if you have access to a developer instance of `geth`. If you don't already have access to a developer instance of `geth`, follow the [installation](../../docs/install.md) instructions.
 
-          mix compile && mix run --no-start -e \
-            '
-              OmiseGO.Eth.DevHelpers.prepare_env!
-              |> OmiseGO.Eth.DevHelpers.create_conf_file
-              |> IO.puts
-            ' > your_config_file.exs
+A developer instance of geth runs Ethereum locally and prefunds an account. However, when `geth` terminates, the state of the Ethereum network is lost.
 
-    The above lines:
-      - create, fund and unlock the authority address
-      - deploy the root chain contract
-      - create the config file
+```
+geth --dev --dev.period 1 --rpc --rpcapi personal,web3,eth
+```
 
-    You'll need to pass the configuration file to `mix` invocations with `--config your_config_file.exs` flag
+### Persistent developer instance
+Alternatively, a persistent developer instance that does not lose state can be started with the following command:
+```
+geth --dev --dev.period 1 --rpc --rpcapi personal,web3,eth  --datadir ~/.geth --ipc
+```
 
-To play around with the child chain server, you can run an IEx REPL to gain access to helper functions: from `omisego` root dir do `iex -S mix run --no-start --config path/to/config.exs`.
-In the REPL you can run commands mentioned in demos (see `docs/...`, don't pick `OBSOLETE` demos)
+After `geth` is restarted with the above command, the authority account must be unlocked
+
+```
+geth attach http://127.0.0.1:8545
+personal.unlockAccount(“<authority_addr from ~/config.exs>”, '', 0)
+```
+
+### Configure the `omisego_eth` app
+
+The following step will:
+- create, fund and unlock the authority address
+- deploy the root chain contract
+- create the config file
+
+ deploy the root chain contract and configure your app:
+Note that `geth` needs to already be running for this step to work!
+```
+mix compile && mix run --no-start -e \
+ '
+   OmiseGO.Eth.DevHelpers.prepare_env!
+   |> OmiseGO.Eth.DevHelpers.create_conf_file
+   |> IO.puts
+ ' > ~/config.exs
+```
+
+The result should look something like this (use `cat ~/config.exs` to check):
+```
+use Mix.Config
+config :omisego_eth,
+  contract_addr: "0x005f49af1af9eee6da214e768683e1cc8ab222ac",
+  txhash_contract: "0x3afd2c1b48eaa3100823de1924d42bd48ee25db1fd497998158f903b6a841e92",
+  authority_addr: "0x5c1a5e5d94067c51ec51c6c00416da56aac6b9a3"
+```
+The above values are only demonstrative, **do not** copy and paste!
+
+Note that you'll need to pass the configuration file each time you run `mix` with the following parameter `--config ~/config.exs` flag
+
+### Initialize the child chain database
+Initialize the database with the following command:
+```
+mix run --no-start -e 'OmiseGO.DB.init()'
+```
+
+### Start it up!
+* Start up geth if not already started.
+* Start Up the child chain server
+
+```
+cd omisego/apps/omisego_jsonrpc
+mix run --no-halt --config ~/config.exs
+```
+
+### Follow the demos
+After starting the child chain server as above, you may follow the steps the demo scripts. Note that some steps should be performed in the Elixir shell (iex) and some in the shell directly.
+
+From the `omisego` root directory:
+```
+iex -S mix run --no-start --config ~/config.exs
+```
+
+Follow one of the scripts in the [docs](../../docs) directory. Don't pick any `OBSOLETE` demos.
 
 ## Using the child chain server's API
 
@@ -125,22 +181,6 @@ The argument names are indicated by the `@spec` clauses.
 ### Websockets
 
 **TODO** consider if we want to expose at all
-
-## Overview of apps
-
-OmiseGO is an umbrella app comprising of several Elixir applications.
-The apps listed below belong to the child chain server application, for Watcher-related apps see `apps/omisego_watcher/README.md`.
-
-The general idea of the apps responsibilities is:
-  - `omisego_api` - child chain server and main entrypoint to the functionality
-    - tracks Ethereum for things happening in the root chain contract (deposits/exits)
-    - gathers transactions, decides on validity, forms blocks, persists
-    - submits blocks to the root chain contract
-    - see `lib/api/application.ex` for a rundown of children processes involved
-  - `omisego_db` - wrapper around the child chain server's database to store the UTXO set and blocks necessary for state persistence
-  - `omisego_eth` - wrapper around the [Ethereum RPC client](https://github.com/exthereum/ethereumex)
-  - `omisego_jsonrpc` - a JSONRPC 2.0 server being the gateway to `omisego_api`
-  - `omisego_performance` - performance tester for the child chain server
 
 ## Running a child chain in practice
 

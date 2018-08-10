@@ -76,7 +76,7 @@ defmodule OmiseGO.API.TestHelper do
           list({pos_integer, pos_integer, 0 | 1, map}),
           Transaction.currency(),
           list({Crypto.address_t(), pos_integer})
-        ) :: {Transaction.Signed.t(), Transaction.t()}
+        ) :: Transaction.Signed.t()
   def create_signed(inputs, currency, outputs) do
     raw_tx =
       Transaction.new(
@@ -95,8 +95,15 @@ defmodule OmiseGO.API.TestHelper do
     Transaction.Signed.encode(signed_tx)
   end
 
-  @spec encode_address(Crypto.address_t()) :: String.t()
-  def encode_address(address) do
-    "0x" <> Base.encode16(address, case: :lower)
+  @spec write_fee_file(%{Crypto.address_t() => non_neg_integer}) :: {:ok, binary}
+  def write_fee_file(map) do
+    {:ok, json} =
+      map
+      |> Enum.map(fn {"0x" <> _ = k, v} -> %{token: k, flat_fee: v} end)
+      |> Poison.encode()
+
+    {:ok, path} = Briefly.create(prefix: "omisego_operator_test_fees_file")
+    :ok = File.write(path, json, [:write])
+    {:ok, path}
   end
 end

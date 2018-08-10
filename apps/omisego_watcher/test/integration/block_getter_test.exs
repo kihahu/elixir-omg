@@ -6,49 +6,77 @@ defmodule OmiseGOWatcher.BlockGetterTest do
   use Phoenix.ChannelTest
 
   alias OmiseGO.API
+  alias OmiseGO.API.Crypto
+  alias OmiseGO.API.Utxo
+  require Utxo
   alias OmiseGO.Eth
-  alias OmiseGOWatcher.Eventer.Event
-  alias OmiseGOWatcher.TestHelper
-  alias OmiseGOWatcherWeb.TransferChannel
-  alias OmiseGOWatcher.Integration.TestHelper, as: IntegrationTest
   alias OmiseGO.JSONRPC.Client
+  alias OmiseGOWatcher.Eventer.Event
+  alias OmiseGOWatcher.Integration
+  alias OmiseGOWatcher.TestHelper
+  alias OmiseGOWatcherWeb.ByzantineChannel
+  alias OmiseGOWatcherWeb.TransferChannel
 
   import ExUnit.CaptureLog
 
   @moduletag :integration
 
   @timeout 20_000
-  @block_offset 1_000_000_000
-  @eth OmiseGO.API.Crypto.zero_address()
+  @eth Crypto.zero_address()
+  @eth_hex String.duplicate("00", 20)
 
   @endpoint OmiseGOWatcherWeb.Endpoint
 
   @tag fixtures: [:watcher_sandbox, :contract, :geth, :child_chain, :root_chain_contract_config, :alice, :bob]
   test "get the blocks from child chain after transaction and start exit",
        %{contract: contract, alice: alice, bob: bob} do
-    alice_address = API.TestHelper.encode_address(alice.addr)
+    {:ok, alice_address} = Crypto.encode_address(alice.addr)
 
-    {:ok, _, _socket} = subscribe_and_join(socket(), TransferChannel, TestHelper.create_topic("transfer", alice_address))
+    {:ok, _, _socket} =
+      subscribe_and_join(socket(), TransferChannel, TestHelper.create_topic("transfer", alice_address))
 
-    deposit_blknum = IntegrationTest.deposit_to_child_chain(alice, 10, contract)
+    deposit_blknum = Integration.TestHelper.deposit_to_child_chain(alice, 10, contract)
     # TODO remove slpeep after synch deposit synch
     :timer.sleep(100)
     tx = API.TestHelper.create_encoded([{deposit_blknum, 0, 0, alice}], @eth, [{alice, 7}, {bob, 3}])
     {:ok, %{blknum: block_nr}} = Client.call(:submit, %{transaction: tx})
 
-    IntegrationTest.wait_until_block_getter_fetches_block(block_nr, @timeout)
+    Integration.TestHelper.wait_until_block_getter_fetches_block(block_nr, @timeout)
 
     encode_tx = Client.encode(tx)
 
-    assert [%{"amount" => 3, "blknum" => block_nr, "oindex" => 0, "txindex" => 0, "txbytes" => encode_tx}] ==
-             get_utxo(bob)
+    # TODO write to db seems to be async and wait_until_block_getter_fetches_block
+    # returns too early
 
-    assert [%{"amount" => 7, "blknum" => block_nr, "oindex" => 0, "txindex" => 0, "txbytes" => encode_tx}] ==
-             get_utxo(alice)
+    :timer.sleep(100)
+
+    assert [
+             %{
+               "currency" => @eth_hex,
+               "amount" => 3,
+               "blknum" => block_nr,
+               "oindex" => 0,
+               "txindex" => 0,
+               "txbytes" => encode_tx
+             }
+           ] == get_utxo(bob)
+
+    assert [
+             %{
+               "currency" => @eth_hex,
+               "amount" => 7,
+               "blknum" => block_nr,
+               "oindex" => 0,
+               "txindex" => 0,
+               "txbytes" => encode_tx
+             }
+           ] == get_utxo(alice)
 
     {:ok, recovered_tx} = API.Core.recover_tx(tx)
     {:ok, {block_hash, _}} = Eth.get_child_chain(block_nr)
-    %{eth_height: eth_height} = Eth.get_block_submission(block_hash)
+
+    # TODO: this is turned off now and set to zero. Rethink test after this gets fixed (possibly test differently)
+    eth_height = 0
 
     address_received_event =
       Client.encode(%Event.AddressReceived{
@@ -72,15 +100,15 @@ defmodule OmiseGOWatcher.BlockGetterTest do
 
     %{
       utxo_pos: utxo_pos,
-      tx_bytes: tx_bytes,
+      txbytes: txbytes,
       proof: proof,
       sigs: sigs
-    } = IntegrationTest.compose_utxo_exit(block_nr, 0, 0)
+    } = Integration.TestHelper.compose_utxo_exit(block_nr, 0, 0)
 
     {:ok, txhash} =
       Eth.start_exit(
-        utxo_pos * @block_offset,
-        tx_bytes,
+        utxo_pos,
+        txbytes,
         proof,
         sigs,
         1,
@@ -92,7 +120,9 @@ defmodule OmiseGOWatcher.BlockGetterTest do
 
     {:ok, height} = Eth.get_ethereum_height()
 
-    assert {:ok, [%{amount: 7, blknum: block_nr, oindex: 0, owner: alice_address, txindex: 0, token: @eth}]} ==
+    utxo_pos = Utxo.position(block_nr, 0, 0) |> Utxo.Position.encode()
+
+    assert {:ok, [%{amount: 7, utxo_pos: utxo_pos, owner: alice_address, token: @eth}]} ==
              Eth.get_exits(0, height, contract.contract_addr)
   end
 
@@ -109,9 +139,10 @@ defmodule OmiseGOWatcher.BlockGetterTest do
       end
     end
 
+    {:ok, _, _socket} = subscribe_and_join(socket(), ByzantineChannel, "byzantine")
+
     JSONRPC2.Servers.HTTP.http(BadChildChainHash, port: Application.get_env(:omisego_jsonrpc, :omisego_api_rpc_port))
 
-    # TODO asserting correctness of logs printed out, consider checking the event too
     assert capture_log(fn ->
              {:ok, _txhash} =
                Eth.submit_block(
@@ -126,7 +157,16 @@ defmodule OmiseGOWatcher.BlockGetterTest do
                )
 
              assert_block_getter_down()
-           end) =~ inspect({:error, :incorrect_hash})
+           end) =~ inspect(:incorrect_hash)
+
+    invalid_block_event =
+      Client.encode(%Event.InvalidBlock{
+        error_type: :incorrect_hash,
+        hash: BadChildChainHash.different_hash(),
+        number: 1000
+      })
+
+    assert_push("invalid_block", ^invalid_block_event)
 
     JSONRPC2.Servers.HTTP.shutdown(BadChildChainHash)
   end
@@ -142,7 +182,7 @@ defmodule OmiseGOWatcher.BlockGetterTest do
       def block_with_incorrect_transaction do
         alice = @alice
 
-        recovered = API.TestHelper.create_recovered([{1, 0, 0, alice}], API.Crypto.zero_address(), [{alice, 10}])
+        recovered = API.TestHelper.create_recovered([{1, 0, 0, alice}], Crypto.zero_address(), [{alice, 10}])
 
         API.Block.hashed_txs_at([recovered], 1000)
       end
@@ -152,6 +192,8 @@ defmodule OmiseGOWatcher.BlockGetterTest do
       end
     end
 
+    {:ok, _, _socket} = subscribe_and_join(socket(), ByzantineChannel, "byzantine")
+
     JSONRPC2.Servers.HTTP.http(
       BadChildChainTransaction,
       port: Application.get_env(:omisego_jsonrpc, :omisego_api_rpc_port)
@@ -159,7 +201,6 @@ defmodule OmiseGOWatcher.BlockGetterTest do
 
     %API.Block{hash: hash} = BadChildChainTransaction.block_with_incorrect_transaction()
 
-    # TODO asserting correctness of logs printed out, consider checking the event too
     assert capture_log(fn ->
              {:ok, _txhash} =
                Eth.submit_block(
@@ -174,7 +215,16 @@ defmodule OmiseGOWatcher.BlockGetterTest do
                )
 
              assert_block_getter_down()
-           end) =~ inspect({:error, :utxo_not_found})
+           end) =~ inspect(:tx_execution)
+
+    invalid_block_event =
+      Client.encode(%Event.InvalidBlock{
+        error_type: :tx_execution,
+        hash: hash,
+        number: 1000
+      })
+
+    assert_push("invalid_block", ^invalid_block_event)
 
     JSONRPC2.Servers.HTTP.shutdown(BadChildChainTransaction)
   end
@@ -184,7 +234,8 @@ defmodule OmiseGOWatcher.BlockGetterTest do
   end
 
   defp get_utxo(%{addr: address}) do
-    decoded_resp = TestHelper.rest_call(:get, "account/utxo?address=#{Client.encode(address)}")
+    {:ok, address_encode} = Crypto.encode_address(address)
+    decoded_resp = TestHelper.rest_call(:get, "account/utxo?address=#{address_encode}")
     decoded_resp["utxos"]
   end
 end

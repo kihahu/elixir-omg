@@ -1,7 +1,8 @@
 # Submitting transactions and getting a submitted block from the child chain API
 
 The following demo is a mix of commands executed in IEx (Elixir's) REPL (see README.md for instructions) and shell.
-**NOTE**: start IEx REPL with code and config loaded, as described in README.md instructions.
+
+Run a developer's Child chain server and start IEx REPL with code and config loaded, as described in README.md instructions.
 
 ```elixir
 
@@ -10,10 +11,6 @@ The following demo is a mix of commands executed in IEx (Elixir's) REPL (see REA
 # we're going to be using the exthereum's client to geth's JSON RPC
 {:ok, _} = Application.ensure_all_started(:ethereumex)
 
-# (paste output from `prepare_env!` to setup the REPL environment)
-contract_address = Application.get_env(:omisego_eth, :contract_addr)
-
-Code.load_file("apps/omisego_api/test/testlib/test_helper.ex")
 alias OmiseGO.{API, Eth}
 alias OmiseGO.API.Crypto
 alias OmiseGO.API.State.Transaction
@@ -21,14 +18,14 @@ alias OmiseGO.API.TestHelper
 
 alice = TestHelper.generate_entity()
 bob = TestHelper.generate_entity()
+eth = Crypto.zero_address()
 
 {:ok, alice_enc} = Eth.DevHelpers.import_unlock_fund(alice)
-
 
 ### START DEMO HERE
 
 # sends a deposit transaction _to Ethereum_
-{:ok, deposit_tx_hash} = Eth.DevHelpers.deposit(10, 0, alice_enc)
+{:ok, deposit_tx_hash} = Eth.DevHelpers.deposit(10, alice_enc)
 
 # need to wait until its mined
 {:ok, receipt} = Eth.WaitFor.eth_receipt(deposit_tx_hash)
@@ -37,9 +34,7 @@ bob = TestHelper.generate_entity()
 # to do this, look in the logs inside the receipt printed just above
 deposit_blknum = Eth.DevHelpers.deposit_blknum_from_receipt(receipt)
 
-eth = Crypto.zero_address()
-
-# create and prepare transaction for singing
+# create and prepare transaction for signing
 tx =
   Transaction.new([{deposit_blknum, 0, 0}], eth, [{bob.addr, 7}, {alice.addr, 3}]) |>
   Transaction.sign(alice.priv, <<>>) |>
@@ -51,7 +46,7 @@ tx =
 ```bash
 # submits a transaction to the child chain
 # this only will work after the deposit has been "consumed" by the child chain, be patient (~15sec)
-# use the hex-encoded tx bytes and `submit` JSONRPC method descibed in README.md for child chain server
+# use the hex-encoded tx bytes and `submit` JSONRPC method described in README.md for child chain server
 
 curl "localhost:9656" -d '{"params":{"transaction": ""}, "method": "submit", "jsonrpc": "2.0","id":0}'
 ```

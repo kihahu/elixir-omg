@@ -1,10 +1,14 @@
 defmodule OmiseGOWatcher.Integration.TestHelper do
+  @moduledoc """
+  Common helper functions that are useful when integration-testing the watcher
+  """
+
   alias OmiseGO.Eth
-  alias OmiseGOWatcher.TestHelper, as: Test
+  import OmiseGOWatcher.TestHelper
 
   def deposit_to_child_chain(to, value, contract) do
     {:ok, destiny_enc} = Eth.DevHelpers.import_unlock_fund(to)
-    {:ok, deposit_tx_hash} = Eth.DevHelpers.deposit(value, 0, destiny_enc, contract.contract_addr)
+    {:ok, deposit_tx_hash} = Eth.DevHelpers.deposit(value, destiny_enc, contract.contract_addr)
     {:ok, receipt} = Eth.WaitFor.eth_receipt(deposit_tx_hash)
     deposit_blknum = Eth.DevHelpers.deposit_blknum_from_receipt(receipt)
 
@@ -19,17 +23,16 @@ defmodule OmiseGOWatcher.Integration.TestHelper do
     deposit_blknum
   end
 
-  def compose_utxo_exit(block_height, txindex, oindex) do
-    decoded_resp =
-      Test.rest_call(:get, "account/utxo/compose_exit?block_height=#{block_height}&txindex=#{txindex}&oindex=#{oindex}")
+  def compose_utxo_exit(blknum, txindex, oindex) do
+    decoded_resp = rest_call(:get, "account/utxo/compose_exit?blknum=#{blknum}&txindex=#{txindex}&oindex=#{oindex}")
 
-    {:ok, tx_bytes} = Base.decode16(decoded_resp["tx_bytes"], case: :mixed)
+    {:ok, txbytes} = Base.decode16(decoded_resp["txbytes"], case: :mixed)
     {:ok, proof} = Base.decode16(decoded_resp["proof"], case: :mixed)
     {:ok, sigs} = Base.decode16(decoded_resp["sigs"], case: :mixed)
 
     %{
       utxo_pos: decoded_resp["utxo_pos"],
-      tx_bytes: tx_bytes,
+      txbytes: txbytes,
       proof: proof,
       sigs: sigs
     }

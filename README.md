@@ -1,44 +1,61 @@
+<img src="assets/logo.png" align="right" />
+
 # OmiseGO
+The OmiseGO repository contains OmiseGO's implementation of Plasma and forms the basis for the OMG Network.
 
-For the child chain server, see [apps/omisego_api](apps/omisego_api).
+The first release of the OMG Network is based upon **Tesuji Plasma**, an iterative design step over [Plasma MVP](../plasma-mvp). The diagram below illustrates the relationship between the wallet provider and how wallet providers connect to **Tesuji Plasma**.
 
-For the watcher, see [apps/omisego_watcher](apps/omisego_watcher).
+![eWallet server and OMG Network](assets/OMG-network-eWallet.jpg)
+
+See the [Tesuji Plasma design document](FIXME) for a full description for the Child Chain Server and Watcher.
+
+A description of the [application architecture](docs/architecture.md) may be found in the `docs` directory.
+
+For specific documentation about the child chain server, see [apps/omisego_api](apps/omisego_api).
+
+For specifics on the watcher, see [apps/omisego_watcher](apps/omisego_watcher).
 
 For generic information, keep on reading.
 
+## Getting Started
 **IMPORTANT NOTICE: Heavily WIP, expect anything**
 
-## Installation
+A public testnet for the OMG Network is not yet available. However, if you are brave and want to test being a Tesuji Plasma chain operator, read on!
 
-**NOTE**: Currently the child chain server and watcher are bundled within a single umbrella app.
+### Install
+Firstly, **[install](docs/install.md)** the child chain server and watcher.
 
-### Prerequisites
+### Setting up
+The setup process for the Child chain server and for the Watcher is quite similar:
 
-Only **Linux** platforms supported now. Known to work with Ubuntu 16.04
+1. Provide an Ethereum node running connected to the appropriate network
+1. Initialize the child chain server's `OmiseGO.DB` database.
+Do that with `mix run --no-start -e 'OmiseGO.DB.init()'`
+1. (**Child chain server only**) Deploy `RootChain.sol` contract and prepare operator's authority address
+1. Produce a configuration file with `omisego_eth` configured to the contract address, operator (authority) address and hash of contract-deploying transaction.
+To do that use the template, filling it with details on the contract:
 
-  - Install [Elixir](http://elixir-lang.github.io/install.html#unix-and-unix-like).
-    **OTP 20 is required**, meaning that on Ubuntu, you should modify steps in the linked instructions:
-    `sudo apt install esl-erlang=1:20.3.6`
+        use Mix.Config
 
-    **TODO**: revert the requirement when we migrate to OTP 21 in OMG-181
-  - Install or provide access to an Ethereum node (e.g. [geth](https://github.com/ethereum/go-ethereum/wiki/geth))
-  - If required, install the following packages:
-    `sudo apt-get install build-essential autoconf libtool libgmp3-dev`
+        config :omisego_eth,
+          contract_addr: "0x0",
+          authority_addr: "0x0",
+          txhash_contract: "0x0"
 
-### OmiseGO child chain server and watcher
+### Troubleshooting
+Solutions to common problems may be found in the [troubleshooting](docs/troubleshooting.md) document.
 
-**TODO** hex-ify the package.
+### Testing & development
 
-  - `git clone https://github.com/omisego/omisego` - clone this repo
-  - `cd omisego`
-  - `mix deps.get`
-  - If you want to compile/test/deploy contracts see `populus/README.md` for instructions
-
-## Testing & development
-
-  - quick test (no integration tests): `mix test --no-start`
-  - longer-running integration tests: `mix test --no-start --only integration` (requires compiling contracts)
+- Quick test (no integration tests):
+```
+mix test
+```
+- Longer-running integration tests: ```mix test --only integration``` (requires compiling contracts)
 
 For other kinds of checks, refer to the CI/CD pipeline (`Jenkinsfile`).
 
-  - to run a development `iex` REPL with all code loaded: `iex -S mix run --no-start`
+- To run a development `iex` REPL with all code loaded:
+```
+iex -S mix run --no-start
+```
