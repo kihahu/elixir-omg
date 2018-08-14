@@ -32,6 +32,9 @@ defmodule OmiseGO.API.LoggerExt do
       list: :light_green
     ]
   ]
+  def ins(msg) do
+    Kernel.inspect(msg, @inspect_opt)
+  end
 
   defmacro __using__(_opt) do
     quote do
@@ -50,6 +53,7 @@ defmodule OmiseGO.API.LoggerExt do
   # {224, 160, 0}}
   defp level_to_colors(:warn), do: {{204, 140, 0}, {80, 80, 40}}
   defp level_to_colors(:error), do: {{220, 20, 20}, {60, 0, 0}}
+  def print(value, rgb \\ {40, 44, 52}), do: value |> ins |> background(rgb) |> IO.puts()
 
   def background(str, {r, g, b}),
     do: String.replace(IO.ANSI.reset() <> str, IO.ANSI.reset(), "\e[48;2;#{r};#{g};#{b}m") <> IO.ANSI.reset()

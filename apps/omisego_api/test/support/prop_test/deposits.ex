@@ -3,6 +3,8 @@ defmodule OmiseGO.API.State.PropTest.Deposits do
     quote do
       defcommand :deposits do
         alias OmiseGO.API.State.PropTest.Generators
+        import OmiseGO.API.LoggerExt
+
         def impl(deposits), do: StateCoreGS.deposit(deposits)
 
         def args(%{eth: %{blknum: blknum}} = str) do
@@ -12,7 +14,7 @@ defmodule OmiseGO.API.State.PropTest.Deposits do
                 let [
                   currency <- Generators.get_currency(),
                   %{addr: owner} <- Generators.entitie(),
-                  amount <- integer(300, 300_000)
+                  amount <- integer(10_000, 300_000)
                 ] do
                   %{blknum: blknum + number, currency: currency, owner: owner, amount: amount}
                 end
@@ -39,11 +41,17 @@ defmodule OmiseGO.API.State.PropTest.Deposits do
           length(arg) == new_utxo
         end
 
-        def next(%{eth: %{blknum: blknum} = eth, model: %{history: history} = model} = state, [args], ret) do
+        def next(
+              %{eth: %{blknum: blknum} = eth, model: %{history: history, balance: balance} = model} = state,
+              [args],
+              ret
+            ) do
+          new_balance = Enum.reduce(args, balance, fn %{amount: amount}, balance -> balance + amount end)
+
           %{
             state
             | eth: %{eth | blknum: blknum + length(args)},
-              model: %{model | history: [{:deposits, args, ret} | history]}
+              model: %{model | history: [{:deposits, args, ret} | history], balance: new_balance}
           }
         end
       end

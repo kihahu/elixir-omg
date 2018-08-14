@@ -6,7 +6,7 @@ defmodule OmiseGO.API.State.Core do
   # this `use` generates OmiseGO.API.State.CoreGS module:
   # TODO: rework macro so it can be called from test code only
 
-  require Logger
+  use OmiseGO.API.LoggerExt
 
   @maximum_block_size 65_536
 
@@ -310,7 +310,7 @@ defmodule OmiseGO.API.State.Core do
 
     db_updates = db_updates_new_utxos ++ last_deposit_height_db_update(deposits, last_deposit_height)
 
-    _ = if deposits != [], do: Logger.info(fn -> "Recognized deposits #{inspect(deposits)}" end)
+    # _ = if deposits != [], do: Logger.info(fn -> "Recognized deposits #{inspect(deposits)}" end)
 
     new_state = %Core{
       state
