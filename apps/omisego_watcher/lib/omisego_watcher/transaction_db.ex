@@ -25,109 +25,79 @@ defmodule OmiseGOWatcher.TransactionDB do
   alias OmiseGO.API.Utxo
   require Utxo
   alias OmiseGOWatcher.Repo
+  alias OmiseGOWatcher.TxOutputDB
 
   @field_names [
-    :txid,
-    :blknum1,
-    :txindex1,
-    :oindex1,
-    :blknum2,
-    :txindex2,
-    :oindex2,
-    :cur12,
-    :newowner1,
-    :amount1,
-    :newowner2,
-    :amount2,
-    :txblknum,
+    :txhash,
+    :blknum,
     :txindex,
-    :sig1,
-    :sig2
+    :txbytes,
+    :sent_at,
+    :eth_height
   ]
   def field_names, do: @field_names
 
-  @primary_key {:txid, :binary, []}
-  @derive {Phoenix.Param, key: :txid}
+  @primary_key {:txhash, :binary, []}
+  @derive {Phoenix.Param, key: :txhash}
   @derive {Poison.Encoder, except: [:__meta__]}
   schema "transactions" do
-    field(:blknum1, :integer)
-    field(:txindex1, :integer)
-    field(:oindex1, :integer)
+    field :blknum, :integer
+    field :txindex, :integer
+    field :txbytes, :binary
+    field :sent_at, :utc_datetime
+    field :eth_height, :integer
 
-    field(:blknum2, :integer)
-    field(:txindex2, :integer)
-    field(:oindex2, :integer)
-
-    field(:cur12, :binary)
-
-    field(:newowner1, :binary)
-    field(:amount1, :integer)
-
-    field(:newowner2, :binary)
-    field(:amount2, :integer)
-
-    field(:txblknum, :integer)
-    field(:txindex, :integer)
-
-    field(:sig1, :binary, default: <<>>)
-    field(:sig2, :binary, default: <<>>)
-
-    field(:spender1, :binary)
-    field(:spender2, :binary)
+    has_many :inputs, TxOutputDB, foreign_key: :spending_txhash
+    has_many :outputs, TxOutputDB, foreign_key: :creating_txhash
   end
 
-  def get(id) do
+  def insert(
+    %Recovered{
+      signed_tx_hash: signed_tx_hash,
+      signed_tx: %Signed{
+        raw_tx: raw_tx = %Transaction{}
+      } = signed_tx
+    },
+    block_number,
+    txindex,
+    eth_height
+  ) do
+    {:ok, _} =
+      %__MODULE__{
+        txhash: signed_tx_hash,
+        txbytes: signed_tx.signed_tx_bytes,
+        blknum: block_number,
+        txindex: txindex,
+        eth_height: eth_height,
+        outputs: TxOutputDB.create_outputs(raw_tx, signed_tx_hash)
+      }
+    # TODO: Add inputs & outputs
+    |> Repo.insert()
+  end
+
+  def get(hash) do
     __MODULE__
-    |> Repo.get(id)
+    |> Repo.get(hash)
   end
 
-  def find_by_txblknum(txblknum) do
-    Repo.all(from(tr in __MODULE__, where: tr.txblknum == ^txblknum, select: tr))
+  def find_by_blknum(blknum) do
+    Repo.all(from(tr in __MODULE__, where: tr.blknum == ^blknum, select: tr))
   end
 
   @doc """
   Inserts complete and sorted enumberable of transactions for particular block number
   """
-  def update_with(%{transactions: transactions, number: block_number}) do
+  def update_with(%{transactions: transactions, number: block_number, eth_height: eth_height}) do
     transactions
     |> Stream.with_index()
-    |> Enum.map(fn {tx, txindex} -> insert(tx, block_number, txindex) end)
-  end
-
-  defp insert(
-         %Recovered{
-           signed_tx:
-             %Signed{
-               raw_tx: %Transaction{} = transaction,
-               sig1: sig1,
-               sig2: sig2
-             } = tx,
-           spender1: spender1,
-           spender2: spender2
-         },
-         block_number,
-         txindex
-       ) do
-    id = Signed.signed_hash(tx)
-
-    {:ok, _} =
-      %__MODULE__{
-        txid: id,
-        txblknum: block_number,
-        txindex: txindex,
-        sig1: sig1,
-        sig2: sig2,
-        spender1: spender1,
-        spender2: spender2
-      }
-      |> Map.merge(Map.from_struct(transaction))
-      |> Repo.insert()
+    |> Enum.map(fn {tx, txindex} -> insert(tx, block_number, txindex, eth_height) end)
   end
 
   def changeset(transaction_db, attrs) do
     transaction_db
     |> cast(attrs, @field_names)
     |> validate_required(@field_names)
+    |> unique_constraint(:tx_plasma_position, name: :unq_transaction_blknum_txindex)
   end
 
   @spec get_transaction_challenging_utxo(Utxo.Position.t()) :: {:ok, map()} | :utxo_not_spent

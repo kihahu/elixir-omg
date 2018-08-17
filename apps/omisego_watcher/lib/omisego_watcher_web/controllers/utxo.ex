@@ -21,7 +21,7 @@ defmodule OmiseGOWatcherWeb.Controller.Utxo do
   alias OmiseGO.API.Crypto
   alias OmiseGO.API.Utxo
   require Utxo
-  alias OmiseGOWatcher.UtxoDB
+  alias OmiseGOWatcher.TxOutputDB
 
   use OmiseGOWatcherWeb, :controller
 
@@ -30,7 +30,7 @@ defmodule OmiseGOWatcherWeb.Controller.Utxo do
 
     json(conn, %{
       address: address,
-      utxos: encode(UtxoDB.get_utxo(address_decode))
+      utxos: encode(TxOutputDB.get_utxo(address_decode))
     })
   end
 
@@ -39,7 +39,7 @@ defmodule OmiseGOWatcherWeb.Controller.Utxo do
     {txindex, ""} = Integer.parse(txindex)
     {oindex, ""} = Integer.parse(oindex)
 
-    {:ok, composed_utxo_exit} = UtxoDB.compose_utxo_exit(Utxo.position(blknum, txindex, oindex))
+    {:ok, composed_utxo_exit} = TxOutputDB.compose_utxo_exit(Utxo.position(blknum, txindex, oindex))
 
     json(conn, encode(composed_utxo_exit))
   end

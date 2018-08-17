@@ -37,14 +37,14 @@ defmodule OmiseGOWatcherWeb.Controller.Transaction do
     #       or just keep the binaries encoded in the database (increases disk footprint)
     transaction = %{
       transaction
-      | txid: Base.encode16(transaction.txid),
-        cur12: Base.encode16(transaction.cur12),
-        newowner1: Base.encode16(transaction.newowner1),
-        newowner2: Base.encode16(transaction.newowner2),
-        sig1: Base.encode16(transaction.sig1),
-        sig2: Base.encode16(transaction.sig2),
-        spender1: transaction.spender1 && Base.encode16(transaction.spender1),
-        spender2: transaction.spender2 && Base.encode16(transaction.spender2)
+      | txhash: Base.encode16(transaction.txhash)
+      # cur12: Base.encode16(transaction.cur12),
+      # newowner1: Base.encode16(transaction.newowner1),
+      # newowner2: Base.encode16(transaction.newowner2),
+      # sig1: Base.encode16(transaction.sig1),
+      # sig2: Base.encode16(transaction.sig2),
+      # spender1: transaction.spender1 && Base.encode16(transaction.spender1),
+      # spender2: transaction.spender2 && Base.encode16(transaction.spender2)
     }
 
     json(conn, transaction)

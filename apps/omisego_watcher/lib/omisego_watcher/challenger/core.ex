@@ -19,6 +19,7 @@ defmodule OmiseGOWatcher.Challenger.Core do
 
   alias OmiseGO.API.Block
   alias OmiseGO.API.State.Transaction
+  alias OmiseGO.API.State.Transaction.Signed
   alias OmiseGO.API.Utxo
   require Utxo
   alias OmiseGOWatcher.Challenger.Challenge
@@ -40,47 +41,23 @@ defmodule OmiseGOWatcher.Challenger.Core do
     Challenge.create(cutxopos, eutxoindex, txbytes, proof, challenging_tx.sig1 <> challenging_tx.sig2)
   end
 
-  defp encode(%TransactionDB{
-         blknum1: blknum1,
-         txindex1: txindex1,
-         oindex1: oindex1,
-         blknum2: blknum2,
-         txindex2: txindex2,
-         oindex2: oindex2,
-         cur12: cur12,
-         newowner1: newowner1,
-         amount1: amount1,
-         newowner2: newowner2,
-         amount2: amount2
-       }) do
-    tx = %Transaction{
-      blknum1: blknum1,
-      txindex1: txindex1,
-      oindex1: oindex1,
-      blknum2: blknum2,
-      txindex2: txindex2,
-      oindex2: oindex2,
-      cur12: cur12,
-      newowner1: newowner1,
-      amount1: amount1,
-      newowner2: newowner2,
-      amount2: amount2
-    }
-
-    Transaction.encode(tx)
+  defp encode(%TransactionDB{txbytes: txbytes}) do
+    %Signed{raw_tx: raw_tx} = Signed.decode(txbytes)
+    Transaction.encode(raw_tx)
   end
 
+  # FIXME: get_eutxo_index
   defp get_eutxo_index(
-         %TransactionDB{blknum1: blknum, txindex1: txindex, oindex1: oindex},
+         %TransactionDB{},
          Utxo.position(blknum, txindex, oindex)
        ),
        do: 0
 
-  defp get_eutxo_index(
-         %TransactionDB{blknum2: blknum, txindex2: txindex, oindex2: oindex},
-         Utxo.position(blknum, txindex, oindex)
-       ),
-       do: 1
+  # defp get_eutxo_index(
+  #        %TransactionDB{blknum2: blknum, txindex2: txindex, oindex2: oindex},
+  #        Utxo.position(blknum, txindex, oindex)
+  #      ),
+  #      do: 1
 
   defp challenging_utxo_pos(challenging_tx) do
     challenging_tx
@@ -88,9 +65,10 @@ defmodule OmiseGOWatcher.Challenger.Core do
     |> Utxo.Position.encode()
   end
 
-  defp get_challenging_utxo(%TransactionDB{txblknum: blknum, txindex: txindex, amount1: 0}),
-    do: Utxo.position(blknum, txindex, 1)
+  # FIXME: get_challenging_utxo
+  defp get_challenging_utxo(tx = %TransactionDB{}),
+    do: Utxo.position(tx.blknum, tx.txindex, 1)
 
-  defp get_challenging_utxo(%TransactionDB{txblknum: blknum, txindex: txindex}),
-    do: Utxo.position(blknum, txindex, 0)
+  # defp get_challenging_utxo(%TransactionDB{txblknum: blknum, txindex: txindex}),
+  #   do: Utxo.position(blknum, txindex, 0)
 end

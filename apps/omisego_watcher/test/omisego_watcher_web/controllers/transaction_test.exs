@@ -66,7 +66,7 @@ defmodule OmiseGOWatcherWeb.Controller.TransactionTest do
 
   @tag fixtures: [:phoenix_ecto_sandbox, :alice, :bob]
   test "gets all transactions from a block", %{alice: alice, bob: bob} do
-    assert [] == TransactionDB.find_by_txblknum(1)
+    assert [] == TransactionDB.find_by_blknum(1)
 
     alice_spend_recovered = OmiseGO.API.TestHelper.create_recovered([], @eth, [{alice, 100}])
     bob_spend_recovered = OmiseGO.API.TestHelper.create_recovered([], @eth, [{bob, 200}])
@@ -80,7 +80,7 @@ defmodule OmiseGOWatcherWeb.Controller.TransactionTest do
     assert [
              create_expected_transaction(txid_alice, alice_spend_recovered, 1, 0),
              create_expected_transaction(txid_bob, bob_spend_recovered, 1, 1)
-           ] == 1 |> TransactionDB.find_by_txblknum() |> Enum.map(&delete_meta/1)
+           ] == 1 |> TransactionDB.find_by_blknum() |> Enum.map(&delete_meta/1)
   end
 
   @tag fixtures: [:phoenix_ecto_sandbox, :alice, :bob]

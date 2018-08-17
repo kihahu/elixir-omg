@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-defmodule OmiseGOWatcher.UtxoDB do
+defmodule OmiseGOWatcher.TxOutputDB do
   @moduledoc """
-  Ecto schema for utxo
+  Ecto schema for transaction's output (or input)
   """
   use Ecto.Schema
 
@@ -24,21 +24,27 @@ defmodule OmiseGOWatcher.UtxoDB do
   require Utxo
   alias OmiseGOWatcher.Repo
   alias OmiseGOWatcher.TransactionDB
+  alias OmiseGOWatcher.EthEventDB
 
   import Ecto.Changeset
   import Ecto.Query, only: [from: 2]
 
-  @field_names [:address, :currency, :amount, :blknum, :txindex, :oindex, :txbytes]
+  @field_names [:owner, :amount, :currency, :proof]
   def field_names, do: @field_names
 
-  schema "utxos" do
-    field(:address, :binary)
-    field(:currency, :binary)
-    field(:amount, :integer)
-    field(:blknum, :integer)
-    field(:txindex, :integer)
-    field(:oindex, :integer)
-    field(:txbytes, :binary)
+  schema "txoutputs" do
+    field :owner, :binary
+    field :amount, :integer
+    field :currency, :binary
+    field :proof, :binary
+    field :creating_tx_oindex, :integer
+    field :spending_tx_oindex, :integer
+
+    belongs_to :creating_transaction, TransactionDB, foreign_key: :creating_txhash, references: :txhash, type: :binary
+    belongs_to :deposit, EthEventDB, foreign_key: :creating_deposit, references: :hash, type: :binary
+
+    belongs_to :spending_transaction, TransactionDB, foreign_key: :spending_txhash, references: :txhash, type: :binary
+    belongs_to :exit, EthEventDB, foreign_key: :spending_exit, references: :hash, type: :binary
   end
 
   defp consume_transaction(
@@ -48,13 +54,9 @@ defmodule OmiseGOWatcher.UtxoDB do
        ) do
     make_utxo_db = fn transaction, number ->
       %__MODULE__{
-        address: Map.get(transaction, :"newowner#{number}"),
+        owner: Map.get(transaction, :"newowner#{number}"),
         currency: Map.get(transaction, :cur12),
-        amount: Map.get(transaction, :"amount#{number}"),
-        blknum: block_number,
-        txindex: txindex,
-        oindex: Map.get(transaction, :"oindex#{number}"),
-        txbytes: signed_tx_bytes
+        amount: Map.get(transaction, :"amount#{number}")
       }
     end
 
@@ -97,22 +99,22 @@ defmodule OmiseGOWatcher.UtxoDB do
           }
         ]) :: :ok
   def insert_deposits(deposits) do
+
+    #FIXME: Add deposit EthEvent blknum: deposit.block_height, txindex: 0,
+
     deposits
     |> Enum.each(fn deposit ->
       Repo.insert(%__MODULE__{
-        address: deposit.owner,
+        owner: deposit.owner,
         currency: deposit.currency,
         amount: deposit.amount,
-        blknum: deposit.block_height,
-        txindex: 0,
-        oindex: 0,
-        txbytes: <<>>
+        creating_tx_oindex: 0
       })
     end)
   end
 
   def compose_utxo_exit(Utxo.position(blknum, txindex, _) = decoded_utxo_pos) do
-    txs = TransactionDB.find_by_txblknum(blknum)
+    txs = TransactionDB.find_by_blknum(blknum)
 
     case Enum.any?(txs, fn tx -> tx.txindex == txindex end) do
       false -> {:error, :no_tx_for_given_blknum}
@@ -138,10 +140,26 @@ defmodule OmiseGOWatcher.UtxoDB do
 
   def get_all, do: Repo.all(__MODULE__)
 
-  def get_utxo(address) do
-    utxos = Repo.all(from(tr in __MODULE__, where: tr.address == ^address, select: tr))
-    fields_names = List.delete(@field_names, :address)
-    Enum.map(utxos, &Map.take(&1, fields_names))
+  def get_utxo(owner) do
+    # utxos = Repo.all(from(tr in __MODULE__, where: tr.address == ^address, select: tr))
+    # fields_names = List.delete(@field_names, :address)
+    # Enum.map(utxos, &Map.take(&1, fields_names))
+    # FIXME: get_utxo(address)
+    []
+  end
+
+  def create_outputs(%Transaction{
+      cur12: cur12,
+      newowner1: newowner1,
+      amount1: amount1,
+      newowner2: newowner2,
+      amount2: amount2
+    },
+    signed_txhash) do
+    [
+      %__MODULE__{owner: newowner1, amount: amount1, currency: cur12},
+      %__MODULE__{owner: newowner2, amount: amount2, currency: cur12}
+    ]
   end
 
   @doc false

@@ -35,7 +35,7 @@ defmodule OmiseGOWatcher.Challenger do
     utxo_exit = Utxo.position(blknum, txindex, oindex)
 
     with {:ok, challenging_tx} <- TransactionDB.get_transaction_challenging_utxo(utxo_exit) do
-      txs_in_challenging_block = TransactionDB.find_by_txblknum(challenging_tx.txblknum)
+      txs_in_challenging_block = TransactionDB.find_by_blknum(challenging_tx.blknum)
       Core.create_challenge(challenging_tx, txs_in_challenging_block, utxo_exit)
     else
       :utxo_not_spent -> :exit_valid

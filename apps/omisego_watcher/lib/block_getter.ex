@@ -16,7 +16,7 @@ defmodule OmiseGOWatcher.BlockGetter do
   @moduledoc """
   Checking if there are new block from child chain on ethereum.
   Checking if Block from child chain is valid
-  Download new block from child chain and update State, TransactionDB, UtxoDB.
+  Download new block from child chain and update State, TransactionDB, TxOutputDB.
   Manage simultaneous getting and stateless-processing of blocks and manage the results of that
   Detects byzantine situations like BlockWithholding and InvalidBlock and passes this events to Eventer
   """
@@ -24,7 +24,7 @@ defmodule OmiseGOWatcher.BlockGetter do
   alias OmiseGO.Eth
   alias OmiseGOWatcher.BlockGetter.Core
   alias OmiseGOWatcher.Eventer
-  alias OmiseGOWatcher.UtxoDB
+  alias OmiseGOWatcher.TxOutputDB
 
   use GenServer
   use OmiseGO.API.LoggerExt
@@ -50,7 +50,7 @@ defmodule OmiseGOWatcher.BlockGetter do
     with :ok <- continue do
       response = OmiseGOWatcher.TransactionDB.update_with(block)
       nil = Enum.find(response, &(!match?({:ok, _}, &1)))
-      _ = UtxoDB.update_with(block)
+      _ = TxOutputDB.update_with(block)
       _ = Logger.info(fn -> "Consumed block \##{inspect(blknum)}" end)
       {:ok, next_child} = Eth.get_current_child_block()
       {new_state, blocks_numbers} = Core.get_new_blocks_numbers(state, next_child)
