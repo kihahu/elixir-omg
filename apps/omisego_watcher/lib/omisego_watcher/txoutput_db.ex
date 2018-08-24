@@ -34,7 +34,7 @@ defmodule OmiseGOWatcher.TxOutputDB do
 
   schema "txoutputs" do
     field :owner, :binary
-    field :amount, :integer
+    field :amount, OmiseGOWatcher.Types.IntegerType
     field :currency, :binary
     field :proof, :binary
     field :creating_tx_oindex, :integer
@@ -154,8 +154,7 @@ defmodule OmiseGOWatcher.TxOutputDB do
       amount1: amount1,
       newowner2: newowner2,
       amount2: amount2
-    },
-    signed_txhash) do
+    }) do
     [
       %__MODULE__{owner: newowner1, amount: amount1, currency: cur12},
       %__MODULE__{owner: newowner2, amount: amount2, currency: cur12}

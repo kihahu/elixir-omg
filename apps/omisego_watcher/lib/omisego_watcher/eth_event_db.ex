@@ -18,20 +18,52 @@ defmodule OmiseGOWatcher.EthEventDB do
   """
   use Ecto.Schema
 
+  alias OmiseGO.API.Utxo
+  alias OmiseGOWatcher.Repo
+  alias OmiseGOWatcher.TxOutputDB
+
   import Ecto.Changeset
   import Ecto.Query, only: [from: 2]
+
+  require Logger
 
   @field_names [:address, :currency, :amount, :blknum, :txindex, :oindex, :txbytes]
   def field_names, do: @field_names
 
-
+  @primary_key {:hash, :binary, []}
+  @derive {Phoenix.Param, key: :hash}
   schema "ethevents" do
-    field :hash, :binary
     field :deposit_blknum, :integer
     field :deposit_txindex, :integer
-    field :event_type, :integer
+    field :event_type, OmiseGOWatcher.Types.AtomType
 
     has_one :created_utxo, TxOutputDB, foreign_key: :creating_deposit
     has_one :exited_utxo, TxOutputDB, foreign_key: :spending_exit
+  end
+
+  @spec insert_deposit(binary(), pos_integer(), Utxo.t()) :: {:ok, any()}
+  def insert_deposit(hash, blknum, %Utxo{owner: owner, currency: currency, amount: amount}) do
+    {:ok, _} =
+      %__MODULE__{
+        hash: hash,
+        deposit_blknum: blknum,
+        deposit_txindex: 0,
+        event_type: :deposit,
+        created_utxo: %TxOutputDB{
+          owner: owner,
+          currency: currency,
+          amount: amount
+        }
+      }
+      |> Repo.insert()
+  end
+
+  def insert_exit(hash) do
+    {:ok, _} =
+      %__MODULE__{
+        hash: hash,
+        event_type: :exit
+      }
+      |> Repo.insert()
   end
 end

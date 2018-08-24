@@ -69,7 +69,7 @@ defmodule OmiseGOWatcher.TransactionDB do
         blknum: block_number,
         txindex: txindex,
         eth_height: eth_height,
-        outputs: TxOutputDB.create_outputs(raw_tx, signed_tx_hash)
+        outputs: TxOutputDB.create_outputs(raw_tx)
       }
     # TODO: Add inputs & outputs
     |> Repo.insert()

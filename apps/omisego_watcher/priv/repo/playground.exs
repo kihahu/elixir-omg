@@ -15,7 +15,10 @@ defmodule OmiseGOWatcher.Playground do
   alias OmiseGO.API.State.Transaction
   alias OmiseGO.API.State.Transaction.{Signed, Recovered}
   alias OmiseGO.API.Crypto
+  alias OmiseGO.API.Utxo
+  alias OmiseGOWatcher.Repo
   alias OmiseGOWatcher.TransactionDB
+  alias OmiseGOWatcher.EthEventDB
 
   import Ecto.Query
 
@@ -72,38 +75,45 @@ defmodule OmiseGOWatcher.Playground do
     alice = generate_entity()
     bob = generate_entity()
 
+    utxo = %Utxo{
+      owner: alice.addr,
+      currency: @eth,
+      amount: 3618502788666131106986593281521497120414687020801267626233049500247285301247
+    }
+
+    {:ok, _} = EthEventDB.insert_deposit(
+      <<0xde, 0xad, 0xbe, 0xef, 0::224>>,
+      1001,
+      utxo)
+
     utxos = %{
       address: alice.addr,
       utxos: [
         %{
-          blknum: 20,
-          txindex: 42,
-          oindex: 1,
-          currency: @eth,
-          amount: 100
-        },
-        %{
-          blknum: 2,
-          txindex: 21,
+          blknum: 1001,
+          txindex: 0,
           oindex: 0,
           currency: @eth,
-          amount: 43,
+          amount: utxo.amount
         }
       ]
     }
+    to_spend = 196159429230833773869868419475239575503198607639501078528
 
-    {:ok, raw_tx} = Transaction.create_from_utxos(utxos, %{address: bob.addr, amount: 53})
-    IO.puts(inspect raw_tx, pretty: true)
+    {:ok, raw_tx} = Transaction.create_from_utxos(utxos, %{address: bob.addr, amount: to_spend})
+    #IO.puts(inspect raw_tx, pretty: true)
 
     signed_tx = raw_tx |> Transaction.sign(alice.priv, <<>>)
-    IO.puts(inspect signed_tx, pretty: true)
+    #IO.puts(inspect signed_tx, pretty: true)
 
     {:ok, transaction} = Recovered.recover_from(signed_tx)
-    IO.puts(inspect transaction, pretty: true)
+    #IO.puts(inspect transaction, pretty: true)
 
-    result = TransactionDB.insert(transaction, 1000, 557, 20890)
-    IO.inspect(result)
+    result = TransactionDB.insert(transaction, 2000, 111, 20890)
+    #IO.inspect(result)
 
+    txs_from_db = Repo.all(from t in TransactionDB, preload: [:inputs, :outputs])
+    IO.inspect txs_from_db
 
     # Clean up
     Logger.warn("Cleaning the playground")
