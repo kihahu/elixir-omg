@@ -38,10 +38,7 @@ defmodule OMG.Umbrella.MixProject do
       {
         :ex_unit_fixtures,
         git: "https://github.com/omisego/ex_unit_fixtures.git", branch: "feature/require_files_not_load", only: [:test]
-      },
-      # NOTE: we're overriding for the sake of `omg_api` mix.exs deps. Otherwise the override is ignored
-      # TODO: making it consistent is advised: maybe discuss with exth_crypto and submit pr there?
-      {:libsecp256k1, "~> 0.1.4", compile: "${HOME}/.mix/rebar compile", override: true}
+      }
     ]
   end
 end

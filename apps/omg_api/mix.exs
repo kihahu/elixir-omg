@@ -45,7 +45,6 @@ defmodule OMG.API.MixProject do
       {:jsonrpc2, "~> 1.1", only: [:test]},
       {:merkle_tree,
        git: "https://github.com/omisego/merkle_tree.git", branch: "feature/omg-184-add-option-to-not-hash-leaves"},
-      {:libsecp256k1, "~> 0.1.2", compile: "${HOME}/.mix/rebar compile", override: true},
       #
       {:omg_db, in_umbrella: true},
       {:omg_eth, in_umbrella: true}
